@@ -222,6 +222,12 @@ void* AllocateAlignedMemory(size_t size, size_t alignment)
 {
 #ifdef _WIN32
   void* ptr = _aligned_malloc(size, alignment);
+#elif defined(__SWITCH__)
+  // newlib has no posix_memalign even with _GNU_SOURCE. aligned_alloc
+  // is C11 standard and implemented; size must be a multiple of
+  // alignment.
+  size = (size + alignment - 1) & ~(alignment - 1);
+  void* ptr = std::aligned_alloc(alignment, size);
 #else
   void* ptr = nullptr;
   if (posix_memalign(&ptr, alignment, size) != 0)
