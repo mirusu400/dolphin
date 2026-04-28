@@ -727,7 +727,7 @@ if(NOT WIN32)
   endif()
 endif()
 
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT NINTENDO_SWITCH)
   dolphin_find_optional_system_library(HIDAPI Externals/hidapi)
 endif()
 
