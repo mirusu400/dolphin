@@ -242,6 +242,11 @@ elseif(APPLE)
     Logging/ConsoleListenerNix.cpp
     MemArenaDarwin.cpp
   )
+elseif(NINTENDO_SWITCH)
+  target_sources(common PRIVATE
+    Logging/ConsoleListenerNix.cpp
+    MemArenaSwitch.cpp
+  )
 else()
   target_sources(common PRIVATE
     Logging/ConsoleListenerNix.cpp
