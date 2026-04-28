@@ -203,6 +203,17 @@ std::tuple<void*, size_t> GetCurrentThreadStack()
 
   stack_addr = reinterpret_cast<u8*>(stack.ss_sp) - stack.ss_size;
   stack_size = stack.ss_size;
+#elif defined(__SWITCH__)
+  // devkitA64's newlib gates pthread_getattr_np behind __rtems__ so it
+  // is not exposed even with _GNU_SOURCE. The libnx threadGetSelf() /
+  // Thread struct fields would let us recover the stack region exactly,
+  // but Dolphin's only consumer of GetCurrentThreadStack is the JIT
+  // signal handler's stack-overflow probe — Switch homebrew has no
+  // SIGSEGV/SA_ONSTACK plumbing at all today, so returning {0, 0} here
+  // is harmless until M2 wires up exception handling.
+  stack_addr = nullptr;
+  stack_size = 0;
+  (void)self;
 #else
   pthread_attr_t attr;
 
