@@ -753,6 +753,10 @@ elseif(APPLE)
     HW/EXI/BBA/TAP_Apple.cpp
   )
   target_link_libraries(core PUBLIC ${IOB_LIBRARY})
+elseif(NINTENDO_SWITCH)
+  target_sources(core PRIVATE
+    HW/EXI/BBA/TAP_Switch.cpp
+  )
 elseif(UNIX)
   target_sources(core PRIVATE
     HW/EXI/BBA/TAP_Unix.cpp
