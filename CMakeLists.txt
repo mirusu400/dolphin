@@ -700,7 +700,7 @@ if(ENABLE_CUBEB)
   add_definitions(-DHAVE_CUBEB)
 endif()
 
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT NINTENDO_SWITCH)
   dolphin_find_optional_system_library_pkgconfig(
     LibUSB libusb-1.0 LibUSB::LibUSB Externals/libusb
   )
