@@ -21,6 +21,32 @@
 #include "Core/HW/EXI/BBA/TAPServerConnection.h"
 #include "SFML/Network/IpAddress.hpp"
 
+#ifdef __SWITCH__
+// Unix-domain sockets (<sys/un.h>) are absent on Horizon OS, and the
+// TAPServer wire protocol is a developer-loopback feature anyway.
+// Stub the entire class on Switch — every method becomes a no-op
+// returning false/0. M5+ revisit if Switch BBA networking is ever
+// targeted.
+namespace ExpansionInterface
+{
+TAPServerConnection::TAPServerConnection(const std::string& destination, RecvCallback recv_cb,
+                                         std::size_t max_frame_size)
+    : m_destination(destination), m_recv_cb(std::move(recv_cb)), m_max_frame_size(max_frame_size)
+{
+}
+bool TAPServerConnection::Activate() { return false; }
+void TAPServerConnection::Deactivate() {}
+bool TAPServerConnection::IsActivated() { return false; }
+bool TAPServerConnection::RecvInit() { return false; }
+void TAPServerConnection::RecvStart() {}
+void TAPServerConnection::RecvStop() {}
+bool TAPServerConnection::SendAndRemoveAllHDLCFrames(std::string*) { return false; }
+bool TAPServerConnection::SendFrame(const u8*, u32) { return false; }
+bool TAPServerConnection::StartReadThread() { return false; }
+void TAPServerConnection::ReadThreadHandler() {}
+}  // namespace ExpansionInterface
+#else
+
 namespace ExpansionInterface
 {
 
@@ -355,3 +381,4 @@ void TAPServerConnection::ReadThreadHandler()
 }
 
 }  // namespace ExpansionInterface
+#endif  // __SWITCH__

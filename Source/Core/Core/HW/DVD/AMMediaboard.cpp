@@ -31,6 +31,42 @@
 #include "DiscIO/CachedBlob.h"
 #include "VideoCommon/OnScreenDisplay.h"
 
+#ifdef __SWITCH__
+// Triforce arcade emulation requires Win32-style socket calls (SOCKET,
+// WSAPOLLFD, WSAGetLastError, closesocket) and Unix-domain sockets that
+// Horizon OS / libnx do not expose. Stub the entire module on Switch —
+// no homebrew title boots through Triforce code paths, and the stub
+// bodies satisfy the linker for the non-Triforce callers in Boot.cpp,
+// DVDInterface.cpp, and the EXI/SI baseboards. Real implementation is
+// M5+ work if AM-arcade emulation is ever a goal.
+namespace AMMediaboard
+{
+MediaBoardRange::MediaBoardRange(u32 start_, u32 size_, std::span<u8>)
+    : start(start_), end(start_ + size_), buffer(nullptr), buffer_size(0)
+{
+}
+void Init() {}
+void FirmwareMap(bool) {}
+void InitDIMM(const DiscIO::Volume&) {}
+void InitKeys(u32, u32, u32) {}
+u32 ExecuteCommand(std::array<u32, 3>&, u32*, u32, u32) { return 0; }
+u32 GetGameType() { return 0; }
+u32 GetMediaType() { return 0; }
+bool GetTestMenu() { return false; }
+void Shutdown() {}
+void DoState(PointerWrap&) {}
+std::optional<ParsedIPRedirection> ParseIPRedirection(std::string_view)
+{
+  return std::nullopt;
+}
+Common::IPv4Port IPRedirection::Apply(Common::IPv4Port subject) const { return subject; }
+Common::IPv4Port IPRedirection::Reverse(Common::IPv4Port subject) const { return subject; }
+std::string IPRedirection::ToString() const { return {}; }
+IPRedirections GetIPRedirections() { return {}; }
+s32 DebuggerGetSocket(u32) { return -1; }
+}  // namespace AMMediaboard
+#else
+
 #if defined(__linux__) or defined(__APPLE__) or defined(__FreeBSD__) or defined(__NetBSD__) or     \
     defined(__HAIKU__)
 
@@ -2199,3 +2235,4 @@ s32 DebuggerGetSocket(u32 triforce_fd)
   return -1;
 }
 }  // namespace AMMediaboard
+#endif  // __SWITCH__
