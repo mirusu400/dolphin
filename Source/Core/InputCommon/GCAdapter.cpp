@@ -3,12 +3,17 @@
 
 #include "InputCommon/GCAdapter.h"
 
-#ifndef ANDROID
-#define GCADAPTER_USE_LIBUSB_IMPLEMENTATION true
-#define GCADAPTER_USE_ANDROID_IMPLEMENTATION false
-#else
+#if defined(ANDROID)
 #define GCADAPTER_USE_LIBUSB_IMPLEMENTATION false
 #define GCADAPTER_USE_ANDROID_IMPLEMENTATION true
+#elif defined(__SWITCH__)
+// libnx has no libusb. Switch GC adapter passthrough is M4+ work via
+// libnx usb:hs service; until then GCAdapter on Switch is a stub.
+#define GCADAPTER_USE_LIBUSB_IMPLEMENTATION false
+#define GCADAPTER_USE_ANDROID_IMPLEMENTATION false
+#else
+#define GCADAPTER_USE_LIBUSB_IMPLEMENTATION true
+#define GCADAPTER_USE_ANDROID_IMPLEMENTATION false
 #endif
 
 #include <array>
