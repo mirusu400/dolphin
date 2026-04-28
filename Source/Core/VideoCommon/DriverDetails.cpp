@@ -39,6 +39,11 @@ constexpr u32 m_os = OS_ALL | OS_OPENBSD;
 constexpr u32 m_os = OS_ALL | OS_NETBSD;
 #elif __HAIKU__
 constexpr u32 m_os = OS_ALL | OS_HAIKU;
+#elif defined(__SWITCH__)
+// No dedicated OS_SWITCH bit yet; OS_ALL is sufficient — driver-bug
+// matching by OS specificity is not load-bearing on Switch where the
+// driver is always Mesa nouveau via libnx EGL.
+constexpr u32 m_os = OS_ALL;
 #endif
 
 static API m_api = API_OPENGL;
