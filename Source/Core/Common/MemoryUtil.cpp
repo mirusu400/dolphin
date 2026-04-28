@@ -13,6 +13,10 @@
 #ifdef _WIN32
 #include <windows.h>
 #include "Common/StringUtil.h"
+#elif defined(__SWITCH__)
+#include <mutex>
+#include <unordered_map>
+#include <switch.h>
 #else
 #include <stdio.h>
 #include <sys/mman.h>
@@ -28,6 +32,36 @@
 #endif
 #endif
 
+#ifdef __SWITCH__
+namespace
+{
+// libnx jit_t scaffolding for Horizon OS. RWX pages are forbidden under
+// HOS, so AllocateExecutableMemory routes through jitCreate instead of
+// mmap. The map keys recompiled-buffer pointers (rw_addr) to their
+// owning Jit handle so FreeMemoryPages can dispatch jitClose, and so
+// the W^X scope guards know which handles to transition. See
+// docs/jit-memory.md §swap-strategy. The rw->rx alias plumbing inside
+// JitArm64Cache is M2 hardware work tracked separately.
+struct SwitchJitEntry
+{
+  ::Jit handle;
+  size_t size;
+};
+
+std::mutex& SwitchJitMapMutex()
+{
+  static std::mutex m;
+  return m;
+}
+
+std::unordered_map<void*, SwitchJitEntry>& SwitchJitMap()
+{
+  static std::unordered_map<void*, SwitchJitEntry> m;
+  return m;
+}
+}  // namespace
+#endif
+
 namespace Common
 {
 // This is purposely not a full wrapper for virtualalloc/mmap, but it
@@ -37,6 +71,25 @@ void* AllocateExecutableMemory(size_t size)
 {
 #if defined(_WIN32)
   void* ptr = VirtualAlloc(nullptr, size, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+#elif defined(__SWITCH__)
+  // Horizon OS forbids RWX pages. Route through libnx jit_t. Size is
+  // auto-rounded to 4 KiB inside jitCreate; Dolphin's TOTAL_CODE_SIZE
+  // is already a multiple, so no caller-side rounding required.
+  SwitchJitEntry entry{};
+  entry.size = size;
+  Result rc = jitCreate(&entry.handle, size);
+  if (R_FAILED(rc))
+  {
+    PanicAlertFmt("jitCreate failed (rc={:#010x}). The NRO probably lacks "
+                  "the JIT kernel capability — launch via hbmenu/hbloader.",
+                  rc);
+    return nullptr;
+  }
+  void* ptr = jitGetRwAddr(&entry.handle);
+  {
+    std::lock_guard<std::mutex> lock(SwitchJitMapMutex());
+    SwitchJitMap().emplace(ptr, entry);
+  }
 #else
   int map_flags = MAP_ANON | MAP_PRIVATE;
 #if defined(__APPLE__)
@@ -98,6 +151,19 @@ void JITPageWriteEnableExecuteDisable()
   {
     pthread_jit_write_protect_np(0);
   }
+#elif defined(__SWITCH__)
+  if (JITPageWriteNestCounter() == 0)
+  {
+    // Stub-only: transition every registered handle. M2 hardware work
+    // refines this with per-allocation tracking and lifts the rw->rx
+    // alias translation into the dispatcher path. Single-core JIT
+    // (the M2 default) makes the broad transition safe; dual-core
+    // JIT (M6) needs per-handle locking — see docs/jit-memory.md
+    // §thread-affinity.
+    std::lock_guard<std::mutex> lock(SwitchJitMapMutex());
+    for (auto& [rw_ptr, entry] : SwitchJitMap())
+      jitTransitionToWritable(&entry.handle);
+  }
 #endif
   JITPageWriteNestCounter()++;
 }
@@ -116,6 +182,13 @@ void JITPageWriteDisableExecuteEnable()
   if (JITPageWriteNestCounter() == 0)
   {
     pthread_jit_write_protect_np(1);
+  }
+#elif defined(__SWITCH__)
+  if (JITPageWriteNestCounter() == 0)
+  {
+    std::lock_guard<std::mutex> lock(SwitchJitMapMutex());
+    for (auto& [rw_ptr, entry] : SwitchJitMap())
+      jitTransitionToExecutable(&entry.handle);
   }
 #endif
 }
@@ -161,6 +234,30 @@ bool FreeMemoryPages(void* ptr, size_t size)
     if (!VirtualFree(ptr, 0, MEM_RELEASE))
     {
       PanicAlertFmt("FreeMemoryPages failed!\nVirtualFree: {}", GetLastErrorString());
+      return false;
+    }
+#elif defined(__SWITCH__)
+    // JIT pointers go through jitClose. Non-JIT allocations from
+    // AllocateMemoryPages still flow to munmap on Switch's newlib mmap.
+    bool was_jit = false;
+    {
+      std::lock_guard<std::mutex> lock(SwitchJitMapMutex());
+      auto it = SwitchJitMap().find(ptr);
+      if (it != SwitchJitMap().end())
+      {
+        Result rc = jitClose(&it->second.handle);
+        SwitchJitMap().erase(it);
+        was_jit = true;
+        if (R_FAILED(rc))
+        {
+          PanicAlertFmt("jitClose failed (rc={:#010x})", rc);
+          return false;
+        }
+      }
+    }
+    if (!was_jit && munmap(ptr, size) != 0)
+    {
+      PanicAlertFmt("FreeMemoryPages failed!\nmunmap: {}", LastStrerrorString());
       return false;
     }
 #else
