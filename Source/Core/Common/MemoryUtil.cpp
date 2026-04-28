@@ -197,6 +197,14 @@ void* AllocateMemoryPages(size_t size)
 {
 #ifdef _WIN32
   void* ptr = VirtualAlloc(nullptr, size, MEM_COMMIT, PAGE_READWRITE);
+#elif defined(__SWITCH__)
+  // No mmap on devkitA64. Page-aligned heap allocation is fine for
+  // the non-JIT raw-memory callers (config/staging buffers etc.) —
+  // emulated MEM1/MEM2 multi-VA aliasing goes through MemArena which
+  // has its own Switch arm. aligned_alloc requires size to be a
+  // multiple of alignment.
+  size = (size + 0xFFF) & ~static_cast<size_t>(0xFFF);
+  void* ptr = std::aligned_alloc(0x1000, size);
 #else
   void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 
@@ -255,10 +263,10 @@ bool FreeMemoryPages(void* ptr, size_t size)
         }
       }
     }
-    if (!was_jit && munmap(ptr, size) != 0)
+    if (!was_jit)
     {
-      PanicAlertFmt("FreeMemoryPages failed!\nmunmap: {}", LastStrerrorString());
-      return false;
+      // Counterpart of AllocateMemoryPages's aligned_alloc.
+      std::free(ptr);
     }
 #else
     if (munmap(ptr, size) != 0)
@@ -292,6 +300,10 @@ bool ReadProtectMemory(void* ptr, size_t size)
     PanicAlertFmt("ReadProtectMemory failed!\nVirtualProtect: {}", GetLastErrorString());
     return false;
   }
+#elif defined(__SWITCH__)
+  // svcSetMemoryPermission is restricted on Horizon OS for unprivileged
+  // code; treat memory protection toggles as best-effort no-ops. This
+  // is the same approach Apple-Silicon takes for MAP_JIT pages.
 #else
   if (mprotect(ptr, size, PROT_NONE) != 0)
   {
@@ -311,6 +323,8 @@ bool WriteProtectMemory(void* ptr, size_t size, bool allowExecute)
     PanicAlertFmt("WriteProtectMemory failed!\nVirtualProtect: {}", GetLastErrorString());
     return false;
   }
+#elif defined(__SWITCH__)
+  // see ReadProtectMemory — best-effort no-op.
 #elif !(defined(_M_ARM_64) && defined(__APPLE__))
   // MacOS 11.2 on ARM does not allow for changing the access permissions of pages
   // that were marked executable, instead it uses the protections offered by MAP_JIT
@@ -333,6 +347,8 @@ bool UnWriteProtectMemory(void* ptr, size_t size, bool allowExecute)
     PanicAlertFmt("UnWriteProtectMemory failed!\nVirtualProtect: {}", GetLastErrorString());
     return false;
   }
+#elif defined(__SWITCH__)
+  // see ReadProtectMemory — best-effort no-op.
 #elif !(defined(_M_ARM_64) && defined(__APPLE__))
   // MacOS 11.2 on ARM does not allow for changing the access permissions of pages
   // that were marked executable, instead it uses the protections offered by MAP_JIT
