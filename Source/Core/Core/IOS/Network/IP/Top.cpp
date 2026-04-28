@@ -40,6 +40,13 @@
 #define MALLOC(x) HeapAlloc(GetProcessHeap(), 0, (x))
 #define FREE(x) HeapFree(GetProcessHeap(), 0, (x))
 
+#elif defined(__SWITCH__)
+// libnx has no ifaddrs / resolv. The default-interface lookup falls
+// through to FALLBACK_VALUES on Switch.
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #else
 #include <arpa/inet.h>
 #include <ifaddrs.h>
@@ -390,6 +397,10 @@ static std::optional<DefaultInterface> GetSystemDefaultInterface()
     routing_table = {{0, 0, 0, gateway}};
   if (addr || netmask || gateway)
     return DefaultInterface{addr, netmask, gateway, routing_table};
+#elif defined(__SWITCH__)
+  // libnx has no ifaddrs / getifaddrs. The fallback path
+  // (GetSystemDefaultInterfaceOrFallback) takes over with FALLBACK_VALUES.
+  (void)routing_table;
 #else
   // Assume that the address that is used to access the Internet corresponds
   // to the default interface.
