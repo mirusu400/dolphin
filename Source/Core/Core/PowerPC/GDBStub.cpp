@@ -18,6 +18,7 @@ typedef SSIZE_T ssize_t;
 // libnx has no AF_UNIX. GDB stub remains link-safe but its
 // Unix-domain socket path is unreachable; the TCP path still works
 // via libnx BSD sockets.
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
