@@ -144,7 +144,7 @@ elseif(ANDROID)
   )
 endif()
 
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT NINTENDO_SWITCH)
   target_link_libraries(inputcommon PUBLIC LibUSB::LibUSB)
 endif()
 
