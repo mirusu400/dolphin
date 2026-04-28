@@ -8,6 +8,11 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2ipdef.h>
+#elif defined(__SWITCH__)
+// Stubbed below; only need symbols/types the class header references.
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #else
 #include <netinet/in.h>
 #include <sys/socket.h>
