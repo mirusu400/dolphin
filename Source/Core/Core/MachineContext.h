@@ -242,6 +242,26 @@ typedef mcontext_t SContext;
 #else
 #error No context definition for machine
 #endif
+#elif defined(__SWITCH__)
+// Horizon OS has no SIGSEGV / signal-driven fast-mem fault handling, so
+// JitArm64's backpatch fault path is gated off on Switch (HAS_FASTMEM
+// is OFF). Provide a fake SContext so JitInterface.h / JitBase.h
+// compile — same trick the _M_GENERIC arm uses.
+struct FakeSwitchContext
+{
+  unsigned long X[31];
+  unsigned long Sp;
+  unsigned long Pc;
+};
+typedef FakeSwitchContext SContext;
+#if _M_ARM_64
+#define CTX_REG(x) X[x]
+#define CTX_LR X[30]
+#define CTX_SP Sp
+#define CTX_PC Pc
+#else
+#error No context definition for architecture
+#endif
 #else
 #error No context definition for OS
 #endif
