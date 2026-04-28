@@ -9,6 +9,9 @@
 
 #ifdef _WIN32
 #include <Windows.h>
+#elif defined(__SWITCH__)
+// Horizon OS has no dynamic library loader. Switch homebrew links
+// everything statically; DynamicLibrary methods become no-ops/nullptr.
 #else
 #include <dlfcn.h>
 #endif
@@ -81,6 +84,8 @@ bool DynamicLibrary::Open(const char* filename)
 {
 #ifdef _WIN32
   m_handle = reinterpret_cast<void*>(LoadLibraryA(filename));
+#elif defined(__SWITCH__)
+  m_handle = nullptr;  // no dynamic loading on Horizon OS
 #else
   m_handle = dlopen(filename, RTLD_NOW);
 #endif
@@ -94,6 +99,8 @@ void DynamicLibrary::Close()
 
 #ifdef _WIN32
   FreeLibrary(static_cast<HMODULE>(m_handle));
+#elif defined(__SWITCH__)
+  // unreachable — Open never sets m_handle on Switch.
 #else
   dlclose(m_handle);
 #endif
@@ -104,6 +111,8 @@ void* DynamicLibrary::GetSymbolAddress(const char* name) const
 {
 #ifdef _WIN32
   return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(m_handle), name));
+#elif defined(__SWITCH__)
+  return nullptr;
 #else
   return reinterpret_cast<void*>(dlsym(m_handle, name));
 #endif

@@ -36,7 +36,16 @@ void IniFile::ParseLine(std::string_view line, std::string* keyOut, std::string*
   }
 }
 
-const std::string& IniFile::NULL_STRING = "";
+// devkitA64 GCC 14 hits an internal compiler error
+// (decl2.cc:3750 build_cleanup) when a static const std::string& is
+// initialized directly from a string literal — the implicit
+// std::string temporary that the reference would extend trips the
+// bug. Workaround: bind to a named, default-constructed static.
+namespace
+{
+const std::string s_ini_null_string{};
+}
+const std::string& IniFile::NULL_STRING = s_ini_null_string;
 
 IniFile::Section::Section() = default;
 
