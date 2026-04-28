@@ -20,6 +20,22 @@
 #include <windows.h>
 #endif
 
+#ifdef __SWITCH__
+#include <cstdio>
+// Direct stderr+flush bring-up trace. Bypasses Dolphin's logging layer so
+// we still see the last surviving line if the Core thread fatals before
+// log infrastructure can flush. nxlink picks stderr up; the on-SD log
+// sink uses _IOLBF and grabs every line too.
+#define SWITCH_TRACE(fmt_str, ...)                                                                  \
+  do                                                                                                \
+  {                                                                                                 \
+    std::fprintf(stderr, "[switch][Core.cpp:%d] " fmt_str "\n", __LINE__, ##__VA_ARGS__);           \
+    std::fflush(stderr);                                                                            \
+  } while (0)
+#else
+#define SWITCH_TRACE(...) ((void)0)
+#endif
+
 #include "AudioCommon/AudioCommon.h"
 
 #include "Common/Assert.h"
@@ -323,21 +339,27 @@ static void CPUSetInitialExecutionState(Core::System& system, bool force_paused 
 static void CpuThread(Core::System& system, const std::optional<std::string>& savestate_path,
                       bool delete_savestate)
 {
+  SWITCH_TRACE("CpuThread entered");
   if (system.IsDualCoreMode())
     Common::SetCurrentThreadName("CPU thread");
   else
     Common::SetCurrentThreadName("CPU-GPU thread");
 
   // This needs to be delayed until after the video backend is ready.
+  SWITCH_TRACE("CpuThread: ReportGameStart");
   DolphinAnalytics::Instance().ReportGameStart();
 
   // Clear performance data collected from previous threads.
+  SWITCH_TRACE("CpuThread: g_perf_metrics.Reset");
   g_perf_metrics.Reset();
 
   // The JIT need to be able to intercept faults, both for fastmem and for the BLR optimization.
+  SWITCH_TRACE("CpuThread: EMM::IsExceptionHandlerSupported");
   const bool exception_handler = EMM::IsExceptionHandlerSupported();
+  SWITCH_TRACE("CpuThread: exception_handler=%d", static_cast<int>(exception_handler));
   if (exception_handler)
     EMM::InstallExceptionHandler();
+  SWITCH_TRACE("CpuThread: exception handler step done");
 
 #ifdef USE_MEMORYWATCHER
   s_memory_watcher = std::make_unique<MemoryWatcher>();
@@ -378,13 +400,17 @@ static void CpuThread(Core::System& system, const std::optional<std::string>& sa
       }
       else
       {
+        SWITCH_TRACE("CpuThread: CPUSetInitialExecutionState");
         CPUSetInitialExecutionState(system);
+        SWITCH_TRACE("CpuThread: CPUSetInitialExecutionState done");
       }
     }
   }
 
   // Enter CPU run loop. When we leave it - we are done.
+  SWITCH_TRACE("CpuThread: CPU.Run() entering");
   system.GetCPU().Run();
+  SWITCH_TRACE("CpuThread: CPU.Run() returned");
 
 #ifdef USE_MEMORYWATCHER
   s_memory_watcher.reset();
@@ -512,7 +538,9 @@ static void FifoPlayerThread(Core::System& system, const std::optional<std::stri
 static void EmuThread(Core::System& system, std::unique_ptr<BootParameters> boot,
                       WindowSystemInfo wsi)
 {
+  SWITCH_TRACE("EmuThread entered");
   NotifyStateChanged(State::Starting);
+  SWITCH_TRACE("NotifyStateChanged(Starting) returned");
   Common::ScopeGuard flag_guard{[] {
     {
       std::lock_guard lock(s_core_mutex);
@@ -525,9 +553,11 @@ static void EmuThread(Core::System& system, std::unique_ptr<BootParameters> boot
   }};
 
   Common::SetCurrentThreadName("Emuthread - Starting");
+  SWITCH_TRACE("SetCurrentThreadName ok");
 
   // This will become the CPU thread.
   DeclareAsCPUThread();
+  SWITCH_TRACE("DeclareAsCPUThread ok");
 
   s_frame_step = false;
 
@@ -577,11 +607,15 @@ static void EmuThread(Core::System& system, std::unique_ptr<BootParameters> boot
   system.GetMovie().Init(*boot);
   Common::ScopeGuard movie_guard([&system] { system.GetMovie().Shutdown(); });
 
+  SWITCH_TRACE("AudioCommon::InitSoundStream calling");
   AudioCommon::InitSoundStream(system);
+  SWITCH_TRACE("AudioCommon::InitSoundStream returned");
   Common::ScopeGuard audio_guard([&system] { AudioCommon::ShutdownSoundStream(system); });
 
+  SWITCH_TRACE("HW::Init calling");
   HW::Init(system,
            NetPlay::IsNetPlayRunning() ? &(boot_session_data.GetNetplaySettings()->sram) : nullptr);
+  SWITCH_TRACE("HW::Init returned");
 
   Common::ScopeGuard hw_guard{[&system] {
     INFO_LOG_FMT(CONSOLE, "{}", StopMessage(false, "Shutting down HW"));
@@ -601,26 +635,34 @@ static void EmuThread(Core::System& system, std::unique_ptr<BootParameters> boot
 
   // In single-core mode: This holds a video backend shutdown function.
   // In dual-core mode: This holds a GPU thread stopping function (which does the backend shutdown).
+  SWITCH_TRACE("GetInitializedVideoGuard calling");
   const auto video_guard = GetInitializedVideoGuard(system, wsi);
   if (!video_guard)
   {
+    SWITCH_TRACE("GetInitializedVideoGuard returned NULL");
     PanicAlertFmt("Failed to initialize video backend!");
     return;
   }
+  SWITCH_TRACE("GetInitializedVideoGuard returned ok");
 
   if (cpu_info.HTT)
     Config::SetBaseOrCurrent(Config::MAIN_DSP_THREAD, cpu_info.num_cores > 4);
   else
     Config::SetBaseOrCurrent(Config::MAIN_DSP_THREAD, cpu_info.num_cores > 2);
 
+  SWITCH_TRACE("DSPEmulator::Initialize calling");
   if (!system.GetDSP().GetDSPEmulator()->Initialize(system.IsWii(),
                                                     Config::Get(Config::MAIN_DSP_THREAD)))
   {
+    SWITCH_TRACE("DSPEmulator::Initialize returned false");
     PanicAlertFmt("Failed to initialize DSP emulation!");
     return;
   }
+  SWITCH_TRACE("DSPEmulator::Initialize ok");
 
+  SWITCH_TRACE("AudioCommon::PostInitSoundStream calling");
   AudioCommon::PostInitSoundStream(system);
+  SWITCH_TRACE("AudioCommon::PostInitSoundStream returned");
 
   // Set execution state to known values (CPU/FIFO/Audio Paused)
   system.GetCPU().Break();
@@ -639,8 +681,13 @@ static void EmuThread(Core::System& system, std::unique_ptr<BootParameters> boot
   {
     ASSERT(IsCPUThread());
     CPUThreadGuard guard(system);
+    SWITCH_TRACE("CBoot::BootUp calling");
     if (!CBoot::BootUp(system, guard, std::move(boot)))
+    {
+      SWITCH_TRACE("CBoot::BootUp returned false");
       return;
+    }
+    SWITCH_TRACE("CBoot::BootUp ok");
   }
 
   // Initialise Wii filesystem contents.
@@ -662,6 +709,7 @@ static void EmuThread(Core::System& system, std::unique_ptr<BootParameters> boot
       GetVideoEvents().after_present_event.Register(&Core::Callback_FramePresented);
 
   // Setup our core
+  SWITCH_TRACE("PowerPC::SetMode calling");
   if (Config::Get(Config::MAIN_CPU_CORE) != PowerPC::CPUCore::Interpreter)
   {
     system.GetPowerPC().SetMode(PowerPC::CoreMode::JIT);
@@ -670,11 +718,14 @@ static void EmuThread(Core::System& system, std::unique_ptr<BootParameters> boot
   {
     system.GetPowerPC().SetMode(PowerPC::CoreMode::Interpreter);
   }
+  SWITCH_TRACE("PowerPC::SetMode ok");
 
   UpdateTitle(system);
 
   // Become the CPU thread.
+  SWITCH_TRACE("cpu_thread_func entering");
   cpu_thread_func(system, savestate_path, delete_savestate);
+  SWITCH_TRACE("cpu_thread_func returned");
 }
 
 // Set or get the running state

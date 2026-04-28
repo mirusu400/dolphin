@@ -1036,6 +1036,11 @@ bool IsDetected(const char** error_message)
   return false;
 #elif GCADAPTER_USE_ANDROID_IMPLEMENTATION
   return s_detected;
+#else
+  // Switch (no libusb, no Android JNI). Reports no GC adapter.
+  if (error_message)
+    *error_message = nullptr;
+  return false;
 #endif
 }
 
