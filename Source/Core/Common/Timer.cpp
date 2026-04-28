@@ -214,6 +214,9 @@ auto SteadyAwakeClock::now() -> time_point
       CLOCK_MONOTONIC;
 #elif defined(__APPLE__)
       CLOCK_UPTIME_RAW;
+#elif defined(__SWITCH__)
+      // libnx exposes CLOCK_MONOTONIC; CLOCK_UPTIME is BSD-only.
+      CLOCK_MONOTONIC;
 #else
       CLOCK_UPTIME;
 #endif

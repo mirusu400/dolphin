@@ -388,6 +388,14 @@ size_t MemPhysical()
   system_info sysinfo;
   get_system_info(&sysinfo);
   return static_cast<size_t>(sysinfo.max_pages * B_PAGE_SIZE);
+#elif defined(__SWITCH__)
+  // libnx: query the application's total memory budget. ~3.2 GiB on
+  // Switch, but the precise number depends on which memory pool the
+  // hbloader handed us. See docs/jit-memory.md §memory-budget.
+  u64 total_mem = 0;
+  if (R_FAILED(svcGetInfo(&total_mem, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0)))
+    return 0;
+  return static_cast<size_t>(total_mem);
 #else
   struct sysinfo memInfo;
   sysinfo(&memInfo);
