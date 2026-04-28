@@ -76,7 +76,7 @@
 #ifdef __HAIKU__
 #define _BSD_SOURCE
 #include <bsd/ifaddrs.h>
-#elif !defined ANDROID
+#elif !defined(ANDROID) && !defined(__SWITCH__)
 #include <ifaddrs.h>
 #endif
 #include <arpa/inet.h>
@@ -2359,9 +2359,10 @@ std::vector<std::pair<std::string, std::string>> NetPlayServer::GetInterfaceList
   {
     WARN_LOG_FMT(NETPLAY, "GetAdaptersAddresses: {}", adapters_result);
   }
-#elif defined(ANDROID)
-// Android has no getifaddrs for some stupid reason.  If this
-// functionality ends up actually being used on Android, fix this.
+#elif defined(ANDROID) || defined(__SWITCH__)
+// Android has no getifaddrs; libnx doesn't either. NetPlay host listing
+// is not load-bearing for Switch homebrew (NetPlay is a stretch goal),
+// so skipping the enumeration leaves the result vector empty.
 #else
   ifaddrs* ifp = nullptr;
   char buf[512];
