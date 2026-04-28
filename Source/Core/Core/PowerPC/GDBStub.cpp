@@ -14,6 +14,14 @@
 #include <ws2tcpip.h>
 typedef SSIZE_T ssize_t;
 #define SHUT_RDWR SD_BOTH
+#elif defined(__SWITCH__)
+// libnx has no AF_UNIX. GDB stub remains link-safe but its
+// Unix-domain socket path is unreachable; the TCP path still works
+// via libnx BSD sockets.
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #else
 #include <netinet/in.h>
 #include <sys/select.h>
@@ -1047,7 +1055,7 @@ void ProcessCommands(bool loop_until_continue)
 static void InitGeneric(int domain, const sockaddr* server_addr, socklen_t server_addrlen,
                         sockaddr* client_addr, socklen_t* client_addrlen);
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__SWITCH__)
 void InitLocal(const char* socket)
 {
   unlink(socket);
