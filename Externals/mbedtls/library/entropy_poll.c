@@ -46,11 +46,25 @@
 
 #if !defined(unix) && !defined(__unix__) && !defined(__unix) && \
     !defined(__APPLE__) && !defined(_WIN32) && !defined(__QNXNTO__) && \
-    !defined(__HAIKU__) && !defined(__midipix__)
+    !defined(__HAIKU__) && !defined(__midipix__) && !defined(__SWITCH__)
 #error "Platform entropy sources only work on Unix and Windows, see MBEDTLS_NO_PLATFORM_ENTROPY in config.h"
 #endif
 
-#if defined(_WIN32) && !defined(EFIX64) && !defined(EFI32)
+#if defined(__SWITCH__)
+
+#include <switch.h>
+
+int mbedtls_platform_entropy_poll( void *data, unsigned char *output, size_t len,
+                           size_t *olen )
+{
+    ((void) data);
+    /* libnx randomGet pulls from the csrng service exposed by Atmosphère. */
+    randomGet(output, len);
+    *olen = len;
+    return( 0 );
+}
+
+#elif defined(_WIN32) && !defined(EFIX64) && !defined(EFI32)
 
 #if !defined(_WIN32_WINNT)
 #define _WIN32_WINNT 0x0400
