@@ -17,11 +17,25 @@
 
 #include "Core/BootManager.h"
 
+#ifdef __SWITCH__
+#include <cstdio>
+#define SWITCH_BOOT_TRACE(fmt_str, ...)                                                           \
+  do                                                                                              \
+  {                                                                                               \
+    std::fprintf(stderr, "[switch][BootManager.cpp:%d] " fmt_str "\n", __LINE__,                 \
+                 ##__VA_ARGS__);                                                                  \
+    std::fflush(stderr);                                                                          \
+  } while (0)
+#else
+#define SWITCH_BOOT_TRACE(...) ((void)0)
+#endif
+
 #include <fmt/format.h>
 
 #include "Common/CommonTypes.h"
 #include "Common/Config/Config.h"
 #include "Common/FileUtil.h"
+#include "Common/WindowSystemInfo.h"
 
 #include "Core/AchievementManager.h"
 #include "Core/Boot/Boot.h"
@@ -49,12 +63,25 @@ bool BootCore(Core::System& system, std::unique_ptr<BootParameters> boot,
               const WindowSystemInfo& wsi)
 {
   if (!boot)
+  {
+    SWITCH_BOOT_TRACE("BootCore rejected null BootParameters");
     return false;
+  }
+
+  SWITCH_BOOT_TRACE("BootCore entered parameter_index=%zu wsi_type=%d", boot->parameters.index(),
+                    static_cast<int>(wsi.type));
 
   SConfig& StartUp = SConfig::GetInstance();
 
+  SWITCH_BOOT_TRACE("SetPathsAndGameMetadata calling");
   if (!StartUp.SetPathsAndGameMetadata(system, *boot))
+  {
+    SWITCH_BOOT_TRACE("SetPathsAndGameMetadata returned false");
     return false;
+  }
+  SWITCH_BOOT_TRACE("SetPathsAndGameMetadata ok game_id=%s title=%s region=%d",
+                    StartUp.GetGameID().c_str(), StartUp.GetTitleDescription().c_str(),
+                    static_cast<int>(StartUp.m_region));
 
   // Movie settings
   auto& movie = system.GetMovie();
@@ -156,11 +183,17 @@ bool BootCore(Core::System& system, std::unique_ptr<BootParameters> boot,
     }
   }
 
+  SWITCH_BOOT_TRACE("system.Initialize calling");
   system.Initialize();
+  SWITCH_BOOT_TRACE("system.Initialize returned");
 
+  SWITCH_BOOT_TRACE("UpdateWantDeterminism calling");
   Core::UpdateWantDeterminism(system, /*initial*/ true);
+  SWITCH_BOOT_TRACE("UpdateWantDeterminism returned");
 
+  SWITCH_BOOT_TRACE("TransferSYSCONFControlToGuest calling");
   ConfigLoaders::TransferSYSCONFControlToGuest();
+  SWITCH_BOOT_TRACE("TransferSYSCONFControlToGuest returned");
 
   if (system.IsWii())
   {
@@ -189,15 +222,21 @@ bool BootCore(Core::System& system, std::unique_ptr<BootParameters> boot,
                         std::holds_alternative<BootParameters::Disc>(boot->parameters);
   if (load_ipl)
   {
-    return Core::Init(
+    SWITCH_BOOT_TRACE("Core::Init via IPL calling");
+    const bool init_ok = Core::Init(
         system,
         std::make_unique<BootParameters>(
             BootParameters::IPL{StartUp.m_region,
                                 std::move(std::get<BootParameters::Disc>(boot->parameters))},
             std::move(boot->boot_session_data)),
         wsi);
+    SWITCH_BOOT_TRACE("Core::Init via IPL returned %d", init_ok ? 1 : 0);
+    return init_ok;
   }
-  return Core::Init(system, std::move(boot), wsi);
+  SWITCH_BOOT_TRACE("Core::Init calling");
+  const bool init_ok = Core::Init(system, std::move(boot), wsi);
+  SWITCH_BOOT_TRACE("Core::Init returned %d", init_ok ? 1 : 0);
+  return init_ok;
 }
 
 void RestoreConfig()

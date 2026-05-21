@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <memory>
@@ -60,6 +61,17 @@
 #include "DiscIO/RiivolutionPatcher.h"
 #include "DiscIO/VolumeDisc.h"
 #include "DiscIO/VolumeWad.h"
+
+#ifdef __SWITCH__
+#define SWITCH_BOOT_TRACE(fmt_str, ...)                                                           \
+  do                                                                                              \
+  {                                                                                               \
+    std::fprintf(stderr, "[switch][Boot.cpp:%d] " fmt_str "\n", __LINE__, ##__VA_ARGS__);        \
+    std::fflush(stderr);                                                                          \
+  } while (0)
+#else
+#define SWITCH_BOOT_TRACE(...) ((void)0)
+#endif
 
 static std::vector<std::string> ReadM3UFile(const std::string& m3u_path,
                                             const std::string& folder_path)
@@ -192,6 +204,8 @@ std::unique_ptr<BootParameters> BootParameters::GenerateFromFile(std::vector<std
                                                                  BootSessionData boot_session_data_)
 {
   ASSERT(!paths.empty());
+  SWITCH_BOOT_TRACE("GenerateFromFile entered path_count=%zu first=%s", paths.size(),
+                    paths.front().c_str());
 
   for (std::string& path : paths)
     UnifyPathSeparators(path);
@@ -200,6 +214,7 @@ std::unique_ptr<BootParameters> BootParameters::GenerateFromFile(std::vector<std
   // that gave an incorrect file name
   if (!File::Exists(paths.front()))
   {
+    SWITCH_BOOT_TRACE("GenerateFromFile missing file: %s", paths.front().c_str());
     PanicAlertFmtT("The specified file \"{0}\" does not exist", paths.front());
     return {};
   }
@@ -211,9 +226,13 @@ std::unique_ptr<BootParameters> BootParameters::GenerateFromFile(std::vector<std
 
   if (extension == ".m3u" || extension == ".m3u8")
   {
+    SWITCH_BOOT_TRACE("GenerateFromFile reading m3u: %s", paths.front().c_str());
     paths = ReadM3UFile(paths.front(), folder_path);
     if (paths.empty())
+    {
+      SWITCH_BOOT_TRACE("GenerateFromFile m3u had no valid entries");
       return {};
+    }
 
     for (std::string& path : paths)
       UnifyPathSeparators(path);
@@ -240,15 +259,19 @@ std::unique_ptr<BootParameters> BootParameters::GenerateFromFile(std::vector<std
        ".elf"}};
   if (disc_image_extensions.contains(extension))
   {
+    SWITCH_BOOT_TRACE("GenerateFromFile treating as disc/executable extension=%s path=%s",
+                      extension.c_str(), path.c_str());
     std::unique_ptr<DiscIO::VolumeDisc> disc = DiscIO::CreateDiscForCore(path);
     if (disc)
     {
+      SWITCH_BOOT_TRACE("CreateDiscForCore ok");
       return std::make_unique<BootParameters>(Disc{std::move(path), std::move(disc), paths},
                                               std::move(boot_session_data_));
     }
 
     if (extension == ".elf")
     {
+      SWITCH_BOOT_TRACE("CreateDiscForCore failed; using ElfReader");
       auto elf_reader = std::make_unique<ElfReader>(path);
       return std::make_unique<BootParameters>(Executable{std::move(path), std::move(elf_reader)},
                                               std::move(boot_session_data_));
@@ -256,27 +279,38 @@ std::unique_ptr<BootParameters> BootParameters::GenerateFromFile(std::vector<std
 
     if (extension == ".dol")
     {
+      SWITCH_BOOT_TRACE("CreateDiscForCore failed; using DolReader");
       auto dol_reader = std::make_unique<DolReader>(path);
       return std::make_unique<BootParameters>(Executable{std::move(path), std::move(dol_reader)},
                                               std::move(boot_session_data_));
     }
 
+    SWITCH_BOOT_TRACE("CreateDiscForCore failed and extension is not executable");
     PanicAlertFmtT("\"{0}\" is an invalid GCM/ISO file, or is not a GC/Wii ISO.", path);
     return {};
   }
 
   if (extension == ".dff")
+  {
+    SWITCH_BOOT_TRACE("GenerateFromFile DFF");
     return std::make_unique<BootParameters>(DFF{std::move(path)}, std::move(boot_session_data_));
+  }
 
   if (extension == ".wad")
   {
+    SWITCH_BOOT_TRACE("GenerateFromFile WAD");
     std::unique_ptr<DiscIO::VolumeWAD> wad = DiscIO::CreateWAD(std::move(path));
     if (wad)
+    {
+      SWITCH_BOOT_TRACE("CreateWAD ok");
       return std::make_unique<BootParameters>(std::move(*wad), std::move(boot_session_data_));
+    }
+    SWITCH_BOOT_TRACE("CreateWAD failed");
   }
 
   if (extension == ".json")
   {
+    SWITCH_BOOT_TRACE("GenerateFromFile game-mod descriptor");
     auto descriptor = DiscIO::ParseGameModDescriptorFile(path);
     if (descriptor)
     {
@@ -300,6 +334,8 @@ std::unique_ptr<BootParameters> BootParameters::GenerateFromFile(std::vector<std
     }
   }
 
+  SWITCH_BOOT_TRACE("GenerateFromFile could not recognize extension=%s path=%s", extension.c_str(),
+                    path.c_str());
   PanicAlertFmtT("Could not recognize file {0}", path);
   return {};
 }
@@ -500,6 +536,9 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
                    std::unique_ptr<BootParameters> boot)
 {
   SConfig& config = SConfig::GetInstance();
+  SWITCH_BOOT_TRACE("CBoot::BootUp entered parameter_index=%zu is_wii=%d region=%d",
+                    boot->parameters.index(), system.IsWii() ? 1 : 0,
+                    static_cast<int>(config.m_region));
 
   // Triforce systems are region free and always must use the NTSC video mode
   if (system.IsTriforce())
@@ -522,25 +561,37 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
     bool operator()(BootParameters::Disc& disc) const
     {
       NOTICE_LOG_FMT(BOOT, "Booting from disc: {}", disc.path);
+      SWITCH_BOOT_TRACE("BootTitle::Disc path=%s", disc.path.c_str());
       const DiscIO::VolumeDisc* volume =
           SetDisc(system.GetDVDInterface(), std::move(disc.volume), disc.auto_disc_change_paths);
 
       if (!volume)
+      {
+        SWITCH_BOOT_TRACE("SetDisc returned null");
         return false;
+      }
 
       if (!EmulatedBS2(system, guard, system.IsWii(), *volume, riivolution_patches))
+      {
+        SWITCH_BOOT_TRACE("EmulatedBS2 returned false");
         return false;
+      }
 
       SConfig::OnTitleDirectlyBooted(guard);
+      SWITCH_BOOT_TRACE("BootTitle::Disc ok");
       return true;
     }
 
     bool operator()(const BootParameters::Executable& executable) const
     {
       NOTICE_LOG_FMT(BOOT, "Booting from executable: {}", executable.path);
+      SWITCH_BOOT_TRACE("BootTitle::Executable path=%s", executable.path.c_str());
 
       if (!executable.reader->IsValid())
+      {
+        SWITCH_BOOT_TRACE("Executable reader invalid");
         return false;
+      }
 
       SetDefaultDisc(system.GetDVDInterface());
 
@@ -576,6 +627,7 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
 
       if (!executable.reader->LoadIntoMemory(system))
       {
+        SWITCH_BOOT_TRACE("Executable LoadIntoMemory failed");
         PanicAlertFmtT("Failed to load the executable to memory.");
         return false;
       }
@@ -600,38 +652,52 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
       if (symbols_changed)
         Host_PPCSymbolsChanged();
 
+      SWITCH_BOOT_TRACE("BootTitle::Executable ok entry=0x%08x", ppc_state.pc);
       return true;
     }
 
     bool operator()(const DiscIO::VolumeWAD& wad) const
     {
+      SWITCH_BOOT_TRACE("BootTitle::WAD");
       SetDefaultDisc(system.GetDVDInterface());
       if (!Boot_WiiWAD(system, wad))
+      {
+        SWITCH_BOOT_TRACE("Boot_WiiWAD returned false");
         return false;
+      }
 
       AchievementManager::GetInstance().LoadGame(&wad);
 
       SConfig::OnTitleDirectlyBooted(guard);
+      SWITCH_BOOT_TRACE("BootTitle::WAD ok");
       return true;
     }
 
     bool operator()(const BootParameters::NANDTitle& nand_title) const
     {
+      SWITCH_BOOT_TRACE("BootTitle::NANDTitle id=0x%016llX",
+                        static_cast<unsigned long long>(nand_title.id));
       SetDefaultDisc(system.GetDVDInterface());
       if (!BootNANDTitle(system, nand_title.id))
+      {
+        SWITCH_BOOT_TRACE("BootNANDTitle returned false");
         return false;
+      }
 
       AchievementManager::GetInstance().LoadGame(nullptr);
 
       SConfig::OnTitleDirectlyBooted(guard);
+      SWITCH_BOOT_TRACE("BootTitle::NANDTitle ok");
       return true;
     }
 
     bool operator()(const BootParameters::IPL& ipl) const
     {
       NOTICE_LOG_FMT(BOOT, "Booting GC IPL: {}", ipl.path);
+      SWITCH_BOOT_TRACE("BootTitle::IPL path=%s has_disc=%d", ipl.path.c_str(), ipl.disc ? 1 : 0);
       if (!File::Exists(ipl.path))
       {
+        SWITCH_BOOT_TRACE("IPL file missing");
         if (ipl.disc)
           PanicAlertFmtT("Cannot start the game, because the GC IPL could not be found.");
         else
@@ -640,7 +706,10 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
       }
 
       if (!Load_BS2(system, ipl.path))
+      {
+        SWITCH_BOOT_TRACE("Load_BS2 returned false");
         return false;
+      }
 
       if (ipl.disc)
       {
@@ -654,14 +723,18 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
       }
 
       SConfig::OnTitleDirectlyBooted(guard);
+      SWITCH_BOOT_TRACE("BootTitle::IPL ok");
       return true;
     }
 
     bool operator()(const BootParameters::DFF& dff) const
     {
       NOTICE_LOG_FMT(BOOT, "Booting DFF: {}", dff.dff_path);
+      SWITCH_BOOT_TRACE("BootTitle::DFF path=%s", dff.dff_path.c_str());
       AchievementManager::GetInstance().LoadGame(nullptr);
-      return system.GetFifoPlayer().Open(dff.dff_path);
+      const bool open_ok = system.GetFifoPlayer().Open(dff.dff_path);
+      SWITCH_BOOT_TRACE("FifoPlayer::Open returned %d", open_ok ? 1 : 0);
+      return open_ok;
     }
 
   private:
@@ -672,10 +745,15 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
   };
 
   if (!std::visit(BootTitle(system, guard, boot->riivolution_patches), boot->parameters))
+  {
+    SWITCH_BOOT_TRACE("BootTitle visitor returned false");
     return false;
+  }
 
+  SWITCH_BOOT_TRACE("ApplyGeneralMemoryPatches patches=%zu", boot->riivolution_patches.size());
   DiscIO::Riivolution::ApplyGeneralMemoryPatches(guard, boot->riivolution_patches);
 
+  SWITCH_BOOT_TRACE("CBoot::BootUp ok");
   return true;
 }
 
