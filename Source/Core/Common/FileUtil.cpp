@@ -18,7 +18,7 @@
 #include "Common/CommonFuncs.h"
 #include "Common/CommonPaths.h"
 #include "Common/CommonTypes.h"
-#ifdef ANDROID
+#if defined(ANDROID) || defined(__SWITCH__)
 #include "Common/Assert.h"
 #endif
 #ifdef __APPLE__
@@ -62,8 +62,10 @@ namespace fs = std::filesystem;
 
 namespace File
 {
-#ifdef ANDROID
+#if defined(ANDROID) || defined(__SWITCH__)
 static std::string s_android_sys_directory;
+#endif
+#ifdef ANDROID
 static std::string s_android_driver_directory;
 static std::string s_android_lib_directory;
 #endif
@@ -775,7 +777,7 @@ static std::string CreateSysDirectoryPath()
   const std::string sys_directory = GetBundleDirectory() + DIR_SEP SYSDATA_DIR DIR_SEP;
 #elif defined(_WIN32) || defined(LINUX_LOCAL_DEV)
   const std::string sys_directory = GetExeDirectory() + DIR_SEP SYSDATA_DIR DIR_SEP;
-#elif defined ANDROID
+#elif defined(ANDROID) || defined(__SWITCH__)
   const std::string sys_directory = s_android_sys_directory + DIR_SEP;
   ASSERT_MSG(COMMON, !s_android_sys_directory.empty(), "Sys directory has not been set");
 #else
@@ -792,7 +794,7 @@ const std::string& GetSysDirectory()
   return sys_directory;
 }
 
-#ifdef ANDROID
+#if defined(ANDROID) || defined(__SWITCH__)
 void SetSysDirectory(const std::string& path)
 {
   INFO_LOG_FMT(COMMON, "Setting Sys directory to {}", path);
@@ -801,6 +803,9 @@ void SetSysDirectory(const std::string& path)
   s_android_sys_directory = path;
 }
 
+#endif
+
+#ifdef ANDROID
 void SetGpuDriverDirectories(const std::string& path, const std::string& lib_path)
 {
   INFO_LOG_FMT(COMMON, "Setting Driver directory to {} and library path to {}", path, lib_path);
