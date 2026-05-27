@@ -14,6 +14,7 @@
 #include "Common/FloatUtils.h"
 #include "Common/JitRegister.h"
 #include "Common/MathUtil.h"
+#include "Common/MemoryUtil.h"
 
 #include "Core/Config/MainSettings.h"
 #include "Core/CoreTiming.h"
@@ -31,6 +32,25 @@ using namespace Arm64Gen;
 void JitArm64::GenerateAsm()
 {
   const Common::ScopedJITPageWriteAndNoExecute enable_jit_page_writes;
+
+  // On Horizon OS the JIT memory allocator returns two distinct virtual
+  // addresses for the same physical pages: rw (writable, what the
+  // emitter wrote into) and rx (executable, what the CPU branches to).
+  // Block entry pointers stored in JitBlockData / m_entry_points /
+  // JitBase::Dispatch's return value are all rw addresses (that's what
+  // GetWritableCodePtr returns at emit time). Branching to a rw alias
+  // from rx-mode CPU is a permission fault, so every absolute BR in the
+  // dispatcher needs the constant `rx - rw` delta added at runtime.
+  //
+  // The delta is constant for the lifetime of this JitArm64 instance
+  // because the entire 256 MiB code buffer is one libnx jit_t
+  // allocation. On non-Switch platforms with unified RWX pages the
+  // helper returns 0 and the additional MOVI2R/ADD pair is elided.
+  const std::intptr_t rw_to_rx = Common::JITRxRwOffset(GetWritableCodePtr());
+  INFO_LOG_FMT(DYNA_REC, "[switch-jit] GenerateAsm rw_base={} rw_to_rx={:#x} ({}{})",
+               fmt::ptr(GetWritableCodePtr()), static_cast<u64>(rw_to_rx),
+               rw_to_rx < 0 ? "-" : "+",
+               rw_to_rx < 0 ? static_cast<u64>(-rw_to_rx) : static_cast<u64>(rw_to_rx));
 
   const bool enable_debugging = Config::IsDebuggingEnabled();
 
@@ -118,6 +138,14 @@ void JitArm64::GenerateAsm()
       LDR(block, cache_base, pc_and_feature_flags);
 
       FixupBranch not_found = CBZ(block);
+      if (rw_to_rx != 0)
+      {
+        // Translate rw alias stored in the entry-points table to its rx
+        // alias before branching. X12 is free here (the only live regs
+        // at this point are block + the CBZ flags).
+        MOVI2R(ARM64Reg::X12, static_cast<u64>(rw_to_rx));
+        ADD(block, block, ARM64Reg::X12);
+      }
       BR(block);
       SetJumpTarget(not_found);
     }
@@ -151,6 +179,14 @@ void JitArm64::GenerateAsm()
       FixupBranch feature_flags_mismatch = B(CC_NEQ);
 
       // return blocks[block_num].normalEntry;
+      if (rw_to_rx != 0)
+      {
+        // normalEntry is rw alias; translate to rx before branching.
+        // X15 is free here — the live regs are entry, feature_flags,
+        // feature_flags_2 (W12/W13), pc (W11), block (X10).
+        MOVI2R(ARM64Reg::X15, static_cast<u64>(rw_to_rx));
+        ADD(entry, entry, ARM64Reg::X15);
+      }
       BR(entry);
 
       SetJumpTarget(not_found);
@@ -172,6 +208,14 @@ void JitArm64::GenerateAsm()
 
     FixupBranch no_block_available = CBZ(ARM64Reg::X0);
 
+    if (rw_to_rx != 0)
+    {
+      // JitBase::Dispatch returns block->normalEntry (rw alias);
+      // translate to rx before branching. X1 is free here (X0 is the
+      // returned pointer; ABI scratch X1-X18 are caller-saved).
+      MOVI2R(ARM64Reg::X1, static_cast<u64>(rw_to_rx));
+      ADD(ARM64Reg::X0, ARM64Reg::X0, ARM64Reg::X1);
+    }
     BR(ARM64Reg::X0);
 
     SetJumpTarget(no_block_available);
@@ -815,6 +859,18 @@ void JitArm64::GenerateQuantizedLoads()
   single_load_quantized[5] = loadPairedU16One;
   single_load_quantized[6] = loadPairedS8One;
   single_load_quantized[7] = loadPairedS16One;
+
+  // The helpers above were emitted via the rw alias of the JIT code
+  // buffer. Block code BLRs through these tables while executing in the
+  // rx alias on Horizon OS, so the stored pointers must be the rx alias
+  // too. On unified-RWX platforms JITWriteToExecAddress is the identity.
+  for (int i = 0; i < 8; ++i)
+  {
+    paired_load_quantized[i] = static_cast<const u8*>(
+        Common::JITWriteToExecAddress(const_cast<u8*>(paired_load_quantized[i])));
+    single_load_quantized[i] = static_cast<const u8*>(
+        Common::JITWriteToExecAddress(const_cast<u8*>(single_load_quantized[i])));
+  }
 }
 
 void JitArm64::GenerateQuantizedStores()
@@ -1035,4 +1091,13 @@ void JitArm64::GenerateQuantizedStores()
   single_store_quantized[5] = storeSingleU16;
   single_store_quantized[6] = storeSingleS8;
   single_store_quantized[7] = storeSingleS16;
+
+  // Same rw->rx translation as the load side.
+  for (int i = 0; i < 8; ++i)
+  {
+    paired_store_quantized[i] = static_cast<const u8*>(
+        Common::JITWriteToExecAddress(const_cast<u8*>(paired_store_quantized[i])));
+    single_store_quantized[i] = static_cast<const u8*>(
+        Common::JITWriteToExecAddress(const_cast<u8*>(single_store_quantized[i])));
+  }
 }

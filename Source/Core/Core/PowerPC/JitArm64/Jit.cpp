@@ -18,6 +18,7 @@
 #include "Common/HostDisassembler.h"
 #include "Common/Logging/Log.h"
 #include "Common/MathUtil.h"
+#include "Common/MemoryUtil.h"
 #include "Common/MsgHandler.h"
 #include "Common/StringUtil.h"
 
@@ -930,8 +931,29 @@ void JitArm64::Run()
   ProtectStack();
   m_system.GetJitInterface().UpdateMembase();
 
-  CompiledCode pExecAddr = (CompiledCode)enter_code;
+  // Translate the writable JIT alias to its executable alias before
+  // dispatching. On platforms with unified RWX pages this is a no-op;
+  // on Horizon OS the two aliases live at different VAs and branching
+  // to the writable view from host context is a permission fault.
+  CompiledCode pExecAddr = reinterpret_cast<CompiledCode>(
+      Common::JITWriteToExecAddress(const_cast<u8*>(enter_code)));
+  static std::atomic<int> dbg_run_calls{0};
+  const int n = dbg_run_calls.fetch_add(1, std::memory_order_relaxed);
+  if (n < 4)
+  {
+    const u32 rw_w0 = *reinterpret_cast<const u32*>(enter_code);
+    const u32 rw_w1 = *reinterpret_cast<const u32*>(enter_code + 4);
+    const u32 rx_w0 = *reinterpret_cast<const u32*>(pExecAddr);
+    const u32 rx_w1 = *reinterpret_cast<const u32*>(reinterpret_cast<const u8*>(pExecAddr) + 4);
+    INFO_LOG_FMT(DYNA_REC,
+                 "[switch-jit] Run() #{} entering enter_code rw={} rx={} rw[0..1]={:#010x} {:#010x} "
+                 "rx[0..1]={:#010x} {:#010x} match={}",
+                 n, fmt::ptr(enter_code), fmt::ptr(reinterpret_cast<void*>(pExecAddr)), rw_w0,
+                 rw_w1, rx_w0, rx_w1, rw_w0 == rx_w0 && rw_w1 == rx_w1 ? 1 : 0);
+  }
   pExecAddr();
+  if (n < 4)
+    INFO_LOG_FMT(DYNA_REC, "[switch-jit] Run() #{} returned from enter_code", n);
 
   UnprotectStack();
 }
@@ -941,7 +963,12 @@ void JitArm64::SingleStep()
   ProtectStack();
   m_system.GetJitInterface().UpdateMembase();
 
-  CompiledCode pExecAddr = (CompiledCode)enter_code;
+  // Translate the writable JIT alias to its executable alias before
+  // dispatching. On platforms with unified RWX pages this is a no-op;
+  // on Horizon OS the two aliases live at different VAs and branching
+  // to the writable view from host context is a permission fault.
+  CompiledCode pExecAddr = reinterpret_cast<CompiledCode>(
+      Common::JITWriteToExecAddress(const_cast<u8*>(enter_code)));
   pExecAddr();
 
   UnprotectStack();
@@ -980,6 +1007,10 @@ void JitArm64::Jit(u32 em_address)
 
 void JitArm64::Jit(u32 em_address, bool clear_cache_and_retry_on_failure)
 {
+  static std::atomic<int> dbg_jit_calls{0};
+  const int jit_n = dbg_jit_calls.fetch_add(1, std::memory_order_relaxed);
+  if (jit_n < 4)
+    INFO_LOG_FMT(DYNA_REC, "[switch-jit] Jit(em_address={:#010x}) #{} enter", em_address, jit_n);
   CleanUpAfterStackFault();
 
   if (SConfig::GetInstance().bJITNoBlockCache)
@@ -1064,6 +1095,18 @@ void JitArm64::Jit(u32 em_address, bool clear_cache_and_retry_on_failure)
 #ifdef JIT_LOG_GENERATED_CODE
       LogGeneratedCode();
 #endif
+      if (jit_n < 4)
+      {
+        const u8* normal_entry_rw = b->normalEntry;
+        const u8* normal_entry_rx = static_cast<const u8*>(
+            Common::JITWriteToExecAddress(const_cast<u8*>(normal_entry_rw)));
+        INFO_LOG_FMT(DYNA_REC,
+                     "[switch-jit] Jit #{} compiled em_address={:#010x} normalEntry rw={} rx={} "
+                     "near=[{} .. {}] far=[{} .. {}]",
+                     jit_n, em_address, fmt::ptr(normal_entry_rw), fmt::ptr(normal_entry_rx),
+                     fmt::ptr(near_start), fmt::ptr(near_end), fmt::ptr(far_start),
+                     fmt::ptr(far_end));
+      }
       return;
     }
   }
