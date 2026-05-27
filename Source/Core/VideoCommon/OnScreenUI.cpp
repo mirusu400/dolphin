@@ -198,8 +198,16 @@ void OnScreenUI::BeginImGuiFrameUnlocked(u32 width, u32 height)
 
   const u64 current_time_us = Common::Timer::NowUs();
   const u64 time_diff_us = current_time_us - m_imgui_last_frame_time;
-  const float time_diff_secs = static_cast<float>(time_diff_us / 1000000.0);
+  float time_diff_secs = static_cast<float>(time_diff_us / 1000000.0);
   m_imgui_last_frame_time = current_time_us;
+
+  // ImGui asserts on DeltaTime <= 0 after the first frame. Two BeginImGuiFrame
+  // calls can land in the same microsecond on Switch (Timer::NowUs granularity
+  // is coarser than the gap between ShaderCache loading-screen updates),
+  // producing time_diff_us == 0. Clamp to a tiny positive value so the frame
+  // never reports a zero delta.
+  if (time_diff_secs <= 0.0f)
+    time_diff_secs = 1.0f / 60.0f / 1000.0f;
 
   // Update I/O with window dimensions.
   ImGuiIO& io = ImGui::GetIO();

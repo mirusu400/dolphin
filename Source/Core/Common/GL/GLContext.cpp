@@ -25,6 +25,9 @@
 #if defined(ANDROID)
 #include "Common/GL/GLInterface/EGLAndroid.h"
 #endif
+#if defined(__SWITCH__)
+#include "Common/GL/GLInterface/Switch.h"
+#endif
 #endif
 
 const std::array<std::pair<int, int>, 9> GLContext::s_desktop_opengl_versions = {
@@ -116,6 +119,10 @@ std::unique_ptr<GLContext> GLContext::Create(const WindowSystemInfo& wsi, bool s
 #if HAVE_EGL
   if (wsi.type == WindowSystemType::Headless || wsi.type == WindowSystemType::FBDev)
     context = std::make_unique<GLContextEGL>();
+#if defined(__SWITCH__)
+  if (wsi.type == WindowSystemType::Switch)
+    context = std::make_unique<GLContextSwitch>();
+#endif
 #endif
 
   if (!context)

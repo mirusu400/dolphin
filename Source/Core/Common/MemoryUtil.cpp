@@ -369,6 +369,46 @@ bool UnWriteProtectMemory(void* ptr, size_t size, bool allowExecute)
   return true;
 }
 
+void* JITWriteToExecAddress(void* rw_ptr)
+{
+#ifdef __SWITCH__
+  if (!rw_ptr)
+    return rw_ptr;
+  std::lock_guard<std::mutex> lock(SwitchJitMapMutex());
+  for (auto& [base, entry] : SwitchJitMap())
+  {
+    auto* rw_base = static_cast<std::uint8_t*>(base);
+    if (rw_ptr >= rw_base &&
+        static_cast<std::uint8_t*>(rw_ptr) < rw_base + entry.size)
+    {
+      auto* rx_base = static_cast<std::uint8_t*>(jitGetRxAddr(&entry.handle));
+      return rx_base + (static_cast<std::uint8_t*>(rw_ptr) - rw_base);
+    }
+  }
+#endif
+  return rw_ptr;
+}
+
+std::intptr_t JITRxRwOffset(void* rw_ptr)
+{
+#ifdef __SWITCH__
+  if (!rw_ptr)
+    return 0;
+  std::lock_guard<std::mutex> lock(SwitchJitMapMutex());
+  for (auto& [base, entry] : SwitchJitMap())
+  {
+    auto* rw_base = static_cast<std::uint8_t*>(base);
+    if (rw_ptr >= rw_base &&
+        static_cast<std::uint8_t*>(rw_ptr) < rw_base + entry.size)
+    {
+      auto* rx_base = static_cast<std::uint8_t*>(jitGetRxAddr(&entry.handle));
+      return static_cast<std::intptr_t>(rx_base - rw_base);
+    }
+  }
+#endif
+  return 0;
+}
+
 size_t MemPhysical()
 {
 #ifdef _WIN32

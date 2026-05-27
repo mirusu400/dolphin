@@ -307,6 +307,11 @@ if(ENABLE_EGL AND EGL_FOUND)
       GL/GLInterface/EGLX11.cpp
       GL/GLInterface/EGLX11.h
     )
+  elseif(NINTENDO_SWITCH)
+    target_sources(common PRIVATE
+      GL/GLInterface/Switch.cpp
+      GL/GLInterface/Switch.h
+    )
   endif()
   target_include_directories(common PRIVATE ${EGL_INCLUDE_DIRS})
   target_link_libraries(common PUBLIC ${EGL_LIBRARIES})
