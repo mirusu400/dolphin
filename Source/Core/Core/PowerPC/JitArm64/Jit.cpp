@@ -272,6 +272,15 @@ void JitArm64::FallBackToInterpreter(UGeckoInstruction inst)
   }
 
   Interpreter::Instruction instr = Interpreter::GetInterpreterOp(inst);
+  {
+    const u32* fn_words = reinterpret_cast<const u32*>(instr);
+    INFO_LOG_FMT(DYNA_REC,
+                 "[switch-jit] FallBackToInterpreter pc={:#010x} opcode={:#010x} "
+                 "instr_fn={} interp_obj={} m_code={} insns={:#010x} {:#010x} {:#010x} {:#010x}",
+                 js.compilerPC, inst.hex, fmt::ptr(reinterpret_cast<const void*>(instr)),
+                 fmt::ptr(&m_system.GetInterpreter()), fmt::ptr(GetCodePtr()),
+                 fn_words[0], fn_words[1], fn_words[2], fn_words[3]);
+  }
   ABI_CallFunction(instr, &m_system.GetInterpreter(), inst.hex);
 
   // If the instruction wrote to any registers which were marked as discarded,
@@ -1106,6 +1115,18 @@ void JitArm64::Jit(u32 em_address, bool clear_cache_and_retry_on_failure)
                      jit_n, em_address, fmt::ptr(normal_entry_rw), fmt::ptr(normal_entry_rx),
                      fmt::ptr(near_start), fmt::ptr(near_end), fmt::ptr(far_start),
                      fmt::ptr(far_end));
+        if (jit_n == 0)
+        {
+          const u32* rw_words = reinterpret_cast<const u32*>(normal_entry_rw);
+          const u32* rx_words = reinterpret_cast<const u32*>(normal_entry_rx);
+          for (int i = 0; i < 80; ++i)
+          {
+            INFO_LOG_FMT(DYNA_REC,
+                         "[switch-jit] block#0 insn[{:>2}] rw_off={:#06x} rw={:#010x} rx={:#010x} "
+                         "match={}",
+                         i, i * 4, rw_words[i], rx_words[i], rw_words[i] == rx_words[i] ? 1 : 0);
+          }
+        }
       }
       return;
     }

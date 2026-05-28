@@ -1897,11 +1897,22 @@ void ARM64XEmitter::MOVI2RImpl(ARM64Reg Rd, T imm)
   const s64 adr_offset = sext_21_bit(imm - pc);
   const u64 adrp_base = (pc & ~0xFFF) + adrp_offset;
   const u64 adr_base = pc + adr_offset;
+#ifndef __SWITCH__
+  // On Switch, JIT memory is dual-mapped (rw != rx). GetCodePtr() returns the
+  // rw write pointer, but the code executes from the rx alias, so PC-relative
+  // ADR/ADRP encodings produce wrong values at runtime. Disable those approaches
+  // and always materialize constants with MOVZ/MOVN/ORR (+MOVK) sequences.
   if constexpr (sizeof(T) == 8)
   {
     try_base(adrp_base, Approach::ADRPBase, false);
     try_base(adr_base, Approach::ADRBase, false);
   }
+#else
+  (void)adrp_offset;
+  (void)adr_offset;
+  (void)adrp_base;
+  (void)adr_base;
+#endif
 
   // Try ORR (or skip it if we already have a 1-instruction encoding - these tests are non-trivial)
   if (instructions_required(best_parts, best_approach) > 1)
